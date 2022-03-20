@@ -31,16 +31,22 @@
 -- while!)
 module GenRegExp
   ( RegExp(..)
+  , ppRegExp
   , generate
   -- * Building regular expressions
   , emptySet
   , emptyString
   , constant
   , oneOf
+  , optional
   , alt
   , cat
   , plus
   , star
+  , pow
+  , upTo
+  , upTo1
+  , scope
   ) where
 
 import Control.Monad.Omega
@@ -54,6 +60,15 @@ data RegExp a
   | Cat (RegExp a) (RegExp a)
   | Plus (RegExp a)
   deriving (Show, Read)
+
+-- | Pretty-print a regular expression.
+ppRegExp :: Show a => RegExp a -> String
+ppRegExp EmptySet = "∅"
+ppRegExp EmptyString = "ε"
+ppRegExp (Constant a) = show a
+ppRegExp (Alt r s) = "( " ++ ppRegExp r ++ " | " ++ ppRegExp s ++ " )"
+ppRegExp (Cat r s) = "( " ++ ppRegExp r ++ " " ++ ppRegExp s ++ " )"
+ppRegExp (Plus r) = "(+ " ++ ppRegExp r ++ " +)"
 
 -- | The empty set of strings.
 emptySet :: RegExp a
@@ -71,6 +86,10 @@ constant = Constant
 -- | The set of all strings of length one from a given token set.
 oneOf :: [a] -> RegExp a
 oneOf = alt . map Constant
+
+-- | Given a regular expression, add the empty string to its set.
+optional :: RegExp a -> RegExp a
+optional = Alt EmptyString
 
 -- | @alt [a, b, c, ..] === (a|b|c|...)@
 alt :: [RegExp a] -> RegExp a
@@ -90,6 +109,23 @@ plus = Plus
 star :: RegExp a -> RegExp a
 star = Alt EmptyString . Plus
 
+-- | The @^@ operator (exactly n).
+pow :: RegExp a -> Int -> RegExp a
+pow r i | i <= 0 = EmptyString
+        | otherwise = foldr1 Cat (replicate i r)
+
+-- | Like @*@, but limits the number of repeats to a certain depth. If given a
+-- negative integer, silently treats it as @0@.
+upTo :: RegExp a -> Int -> RegExp a
+upTo r i | i <= 0 = EmptyString
+         | otherwise = optional (Cat r (r `upTo` (i-1)))
+
+-- | Like @+@, but limits the number of repeats to a certain depth. If given a
+-- non-positive integer, silently treats it as @1@.
+upTo1 :: RegExp a -> Int -> RegExp a
+upTo1 r i | i <= 1 = r
+          | otherwise = (Cat r (optional (r `upTo1` (i-1))))
+
 -- | Generate all strings from a given regular expression in a sensible order
 -- (breadth-first).
 generate :: RegExp a -> [[a]]
@@ -100,6 +136,17 @@ generate (Alt r s) = diagonal [generate r, generate s]
 generate (Cat r s) = runOmega [ x ++ y | x <- each (generate r)
                                        , y <- each (generate s) ]
 generate (Plus r) = diagonal (generate . cat <$> tau r)
+
+-- | "Scope" a regular expression by replacing all the plus operators with
+-- expressions that mean "repeat the expression between 0 and n times."
+scope :: Int
+         -- ^ how many times to repeat each + operator (must be >0)
+      -> RegExp a
+      -> RegExp a
+scope i (Alt r s) = Alt (scope i r) (scope i s)
+scope i (Cat r s) = Cat (scope i r) (scope i s)
+scope i (Plus r) = upTo (scope i r) i
+scope _ r = r
 
 -- | Given a single a, produce the infinite list @[[a], [a,a], [a,a,a], ...]
 tau :: a -> [[a]]
