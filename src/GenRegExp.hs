@@ -29,6 +29,19 @@
 --
 -- Eventually, every string in the language will show up (but it might take a
 -- while!)
+--
+-- Another useful function for generating regular expressions is `scope`, which
+-- can replace every @+@ operator in a regular expression with an "unrolling" of
+-- said operator a finite number of times:
+--
+-- >>> r = plus (alt [constant 'a', constant 'b'])
+-- >>> putStrLn $ ppRegExp r
+-- (+ ( 'a' | 'b' ) +)
+-- >>> r' = scope 2 r
+-- >>> putStrLn $ ppRegExp r'
+-- ( ( 'a' | 'b' ) ( ε | ( 'a' | 'b' ) ) )
+-- >>> generate r'
+-- ["a","aa","b","ab","ba","bb"]
 module GenRegExp
   ( RegExp(..)
   , ppRegExp
@@ -138,14 +151,14 @@ generate (Cat r s) = runOmega [ x ++ y | x <- each (generate r)
 generate (Plus r) = diagonal (generate . cat <$> tau r)
 
 -- | "Scope" a regular expression by replacing all the plus operators with
--- expressions that mean "repeat the expression between 0 and n times."
+-- `upto1` operators.
 scope :: Int
          -- ^ how many times to repeat each + operator (must be >0)
       -> RegExp a
       -> RegExp a
 scope i (Alt r s) = Alt (scope i r) (scope i s)
 scope i (Cat r s) = Cat (scope i r) (scope i s)
-scope i (Plus r) = upTo (scope i r) i
+scope i (Plus r) = upTo1 (scope i r) i
 scope _ r = r
 
 -- | Given a single a, produce the infinite list @[[a], [a,a], [a,a,a], ...]
